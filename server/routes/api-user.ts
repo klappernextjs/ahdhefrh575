@@ -423,4 +423,56 @@ router.get('/daily-signin/history', isAuthenticated, async (req: Request, res: R
   }
 });
 
+/**
+ * GET /api/users/public
+ * Get list of all public users (for opponent search, leaderboard, etc.)
+ * No authentication required
+ */
+router.get('/public', async (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 100;
+    const offset = parseInt(req.query.offset as string) || 0;
+    const search = (req.query.search as string) || '';
+
+    let query = db
+      .select({
+        id: users.id,
+        username: users.username,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        profileImageUrl: users.profileImageUrl,
+        level: users.level,
+        points: users.points,
+        followerCount: users.followerCount,
+        status: users.status,
+      })
+      .from(users)
+      .where(eq(users.status, 'active'));
+
+    if (search) {
+      // Search by username or name
+      query = query.where(
+        db.raw(
+          `(username ILIKE $1 OR first_name ILIKE $1 OR last_name ILIKE $1)`,
+          [`%${search}%`]
+        )
+      );
+    }
+
+    const allUsers = await query
+      .limit(limit)
+      .offset(offset);
+
+    console.log(`📋 GET /api/users/public: ${allUsers.length} users found (search: "${search}")`);
+
+    res.json(allUsers);
+  } catch (error: any) {
+    console.error('Error fetching public users:', error);
+    res.status(500).json({
+      error: 'Failed to fetch users',
+      message: error.message,
+    });
+  }
+});
+
 export default router;

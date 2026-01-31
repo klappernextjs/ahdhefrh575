@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import { storage } from '../storage';
 import { db } from '../db';
-import { challenges, users, chatMessages, votes, disputes } from '@shared/schema';
+import { challenges, users } from '@shared/schema';
 import { eq, inArray, asc } from 'drizzle-orm';
 
 const router = express.Router();
@@ -167,7 +167,7 @@ router.get('/users/:userId', adminAuth, async (req: Request, res: Response) => {
       balance: user.balance?.toString() || '0',
       createdAt: user.createdAt,
       lastLogin: user.lastLogin || user.createdAt,
-      status: user.isActive ? 'active' : 'inactive',
+      status: user.status || 'active',
       isAdmin: user.isAdmin || false,
     });
   } catch (error) {
@@ -293,11 +293,11 @@ router.get('/challenges', adminAuth, async (req: Request, res: Response) => {
 
 /**
  * GET /api/admin/challenges/:id/details
- * Get detailed P2P challenge info including chat, votes, and disputes
+ * Get detailed P2P challenge info including chat, proofs, and settlement tracking
  */
 router.get('/challenges/:id/details', adminAuth, async (req: Request, res: Response) => {
   try {
-    const challengeId = req.params.id;
+    const challengeId = parseInt(req.params.id, 10);
 
     const challenge = await db
       .select()
@@ -322,50 +322,11 @@ router.get('/challenges/:id/details', adminAuth, async (req: Request, res: Respo
       userMap.set(user.id, user);
     });
 
-    // Fetch chat messages
-    const chat_messages = await db
-      .select()
-      .from(chatMessages)
-      .where(eq(chatMessages.challengeId, challengeId))
-      .orderBy(asc(chatMessages.createdAt));
-
-    // Fetch votes
-    const votes_data = await db
-      .select()
-      .from(votes)
-      .where(eq(votes.challengeId, challengeId));
-
-    // Fetch disputes
-    const dispute_data = await db
-      .select()
-      .from(disputes)
-      .where(eq(disputes.challengeId, challengeId))
-      .limit(1);
-
     // Get voting end time
     const votingEndsAt = ch.votingEndsAt ? new Date(ch.votingEndsAt) : null;
     const now = new Date();
     const votingActive = votingEndsAt && votingEndsAt > now;
     const timeRemainingMs = votingEndsAt ? Math.max(0, votingEndsAt.getTime() - now.getTime()) : 0;
-
-    // Count votes by side
-    const yesVotes = votes_data.filter(v => v.side === 'YES').length;
-    const noVotes = votes_data.filter(v => v.side === 'NO').length;
-
-    // Get vote details
-    const voteDetails = await Promise.all(
-      votes_data.map(async (vote) => {
-        const voter = userMap.get(vote.userId);
-        return {
-          userId: vote.userId,
-          username: voter?.username || 'Unknown',
-          profileImageUrl: voter?.profileImageUrl || null,
-          side: vote.side,
-          votedAt: vote.createdAt,
-          proofSubmitted: vote.proofSubmitted || null,
-        };
-      })
-    );
 
     const detailedChallenge = {
       id: ch.id,
@@ -394,8 +355,6 @@ router.get('/challenges/:id/details', adminAuth, async (req: Request, res: Respo
       bothReleased: (ch.creatorReleased || false) && (ch.acceptorReleased || false),
       creatorHesitant: ch.creatorHesitant || false,
       acceptorHesitant: ch.acceptorHesitant || false,
-      creatorReleasedAt: ch.creatorReleasedAt?.toISOString() || null,
-      acceptorReleasedAt: ch.acceptorReleasedAt?.toISOString() || null,
 
       // P2P Settlement
       settlementType: ch.settlementType || 'voting',
@@ -412,14 +371,9 @@ router.get('/challenges/:id/details', adminAuth, async (req: Request, res: Respo
       votingActive,
       votingEndsAt: ch.votingEndsAt?.toISOString() || null,
       timeRemainingMs,
-      yesVotes,
-      noVotes,
-      voteDetails,
 
-      // Dispute
-      hasDispute: dispute_data && dispute_data.length > 0,
-      disputeReason: dispute_data?.[0]?.reason || null,
-      disputeResolution: dispute_data?.[0]?.resolution || null,
+      // Dispute tracking
+      disputeReason: ch.disputeReason || null,
 
       // Timestamps - Critical for dispute resolution
       createdAt: ch.createdAt?.toISOString() || null,
@@ -428,7 +382,6 @@ router.get('/challenges/:id/details', adminAuth, async (req: Request, res: Respo
       acceptedAt: ch.blockchainAcceptedAt?.toISOString() || null, // When acceptor joined
       dueDate: ch.dueDate?.toISOString() || null,
       completedAt: ch.completedAt?.toISOString() || null,
-      votingEndsAt: ch.votingEndsAt?.toISOString() || null,
       creatorReleasedAt: ch.creatorReleasedAt?.toISOString() || null,
       acceptorReleasedAt: ch.acceptorReleasedAt?.toISOString() || null,
       
@@ -443,22 +396,10 @@ router.get('/challenges/:id/details', adminAuth, async (req: Request, res: Respo
         acceptorReleased: ch.acceptorReleasedAt ? new Date(ch.acceptorReleasedAt).toLocaleString() : null,
       },
 
-      // Result
-
       // Blockchain
       creatorTransactionHash: ch.creatorTransactionHash || null,
       acceptorTransactionHash: ch.acceptorTransactionHash || null,
       onChainStatus: ch.onChainStatus || 'pending',
-
-      // Chat
-      chatMessages: chat_messages.map((msg: any) => ({
-        id: msg.id,
-        userId: msg.userId,
-        username: userMap.get(msg.userId)?.username || 'Unknown',
-        message: msg.message,
-        proofUrl: msg.proofUrl || null,
-        createdAt: msg.createdAt?.toISOString() || null,
-      })),
     };
 
     res.json(detailedChallenge);
@@ -474,7 +415,7 @@ router.get('/challenges/:id/details', adminAuth, async (req: Request, res: Respo
  */
 router.delete('/challenges/:id', adminAuth, async (req: Request, res: Response) => {
   try {
-    const challengeId = req.params.id;
+    const challengeId = parseInt(req.params.id, 10);
     
     await db
       .delete(challenges)

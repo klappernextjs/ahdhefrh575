@@ -38,7 +38,7 @@ import { calculateCreationPoints, calculateParticipationPoints } from '../utils/
 import { notifyPointsEarnedParticipation, notifyPointsEarnedCreation } from '../utils/bantahPointsNotifications';
 import { db } from '../db';
 import { challenges, users } from '../../shared/schema';
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { telegramBot } from '../telegramBot';
 
 const router = Router();
@@ -79,15 +79,20 @@ const notificationService = new NotificationService();
 /**
  * GET /api/challenges/public
  * Get all public challenges (no auth required)
- * Includes user data for challenger and challenged users
+ * IMPORTANT: Only shows OPEN P2P challenges (where challenged == null)
+ * Direct P2P challenges (challenged user specified) are NOT shown publicly
+ * They only appear in recipient's Notifications/Activities (like friend requests)
  */
 router.get('/public', async (req: Request, res: Response) => {
   try {
     const allChallenges = await db.select().from(challenges);
     
-    // Filter public challenges (open status or completed)
+    // Filter public challenges: Only OPEN P2P challenges (no specific opponent)
+    // EXCLUDE Direct P2P challenges (where challenged is set - like friend requests)
     const publicChallenges = allChallenges.filter(c => 
-      c.status === 'open' || c.status === 'active' || c.status === 'completed' || c.status === 'pending'
+      (c.status === 'open' || c.status === 'active' || c.status === 'completed' || c.status === 'pending') &&
+      (!c.adminCreated) && // Only P2P challenges, no admin betting pools
+      (c.challenged === null || c.challenged === undefined) // Only OPEN challenges, not Direct P2P
     );
 
     // Get unique user IDs from the challenges
@@ -398,6 +403,7 @@ router.post('/create-p2p', PrivyAuthMiddleware, upload.single('coverImage'), asy
       const pointsWei = BigInt(Math.floor(creationPoints * 1e18));
       console.log(`🎁 Challenge creator will earn ${creationPoints} Bantah Points`);
       
+      // Record points transaction in history
       await recordPointsTransaction({
         userId,
         challengeId: String(challengeId),
@@ -407,6 +413,9 @@ router.post('/create-p2p', PrivyAuthMiddleware, upload.single('coverImage'), asy
         blockchainTxHash: null,
         createdAt: new Date(),
       });
+      
+      // Update user's actual points balance
+      await db.execute(sql`UPDATE users SET points = points + ${creationPoints} WHERE id = ${userId}`);
       
       console.log(`✅ Points transaction recorded: ${creationPoints} points to creator`);
     } catch (pointsError) {

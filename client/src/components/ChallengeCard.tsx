@@ -496,6 +496,7 @@ export function ChallengeCard({
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0 flex-wrap">
             <div onClick={(e) => e.stopPropagation()} className="flex items-center gap-0.5">
+              {/* Open P2P challenges in public feed should show "Accept & Stake" button */}
               {challenge.status === "open" && !challenge.adminCreated && !challenge.challenged && (
                 <div>
                   {!isAuthenticated ? (
@@ -510,14 +511,14 @@ export function ChallengeCard({
                       }}
                       className="bg-emerald-600 dark:bg-emerald-700 hover:bg-emerald-700 dark:hover:bg-emerald-600 text-white border-none text-[10px] px-2 py-0.5 rounded-md font-semibold transition-all"
                     >
-                      ⚔️ Accept
+                      Accept & Stake
                     </button>
                   ) : user?.id === challenge.challenger ? (
                     <button
                       className="bg-emerald-600 dark:bg-emerald-700 text-white text-[10px] px-2 py-0.5 rounded-md font-semibold opacity-50 cursor-not-allowed"
                       title="Cannot accept your own challenge"
                     >
-                      ⚔️ Accept
+                      Accept & Stake
                     </button>
                   ) : (
                     <ConfirmAndStakeButton challengeId={challenge.id} role="acceptor" />
