@@ -230,6 +230,14 @@ export const challenges = pgTable("challenges", {
   acceptorProof: text("acceptor_proof"), // URL or description of proof
   disputeReason: text("dispute_reason"),
   votingEndsAt: timestamp("voting_ends_at"),
+  // Settlement tracking fields
+  stakeAmount: bigint("stake_amount", { mode: "number" }), // Amount each party staked (for P2P challenges)
+  creatorReleased: boolean("creator_released").default(false), // Whether creator has released/accepted settlement
+  acceptorReleased: boolean("acceptor_released").default(false), // Whether acceptor has released/accepted settlement
+  creatorHesitant: boolean("creator_hesitant").default(false), // Flag if creator hasn't released after both proofs
+  acceptorHesitant: boolean("acceptor_hesitant").default(false), // Flag if acceptor hasn't released after both proofs
+  creatorReleasedAt: timestamp("creator_released_at"), // When creator released settlement
+  acceptorReleasedAt: timestamp("acceptor_released_at"), // When acceptor released settlement
 });
 
 // Pairing queue for challenge matching (FCFS with stake tolerance)

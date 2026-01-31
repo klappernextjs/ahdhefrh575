@@ -578,6 +578,7 @@ export default function AdminChallengePayouts() {
               <thead>
                 <tr className="border-b border-slate-700">
                   <th className="text-left p-3 text-slate-400">Type</th>
+                  <th className="text-left p-3 text-slate-400">ID</th>
                   <th className="text-left p-3 text-slate-400">Challenge</th>
                   <th className="text-left p-3 text-slate-400">Participants/Pool</th>
                   <th className="text-left p-3 text-slate-400">Status</th>
@@ -593,6 +594,11 @@ export default function AdminChallengePayouts() {
                     <tr className="border-b border-slate-800 hover:bg-slate-800">
                       <td className="p-3">
                         {getChallengeTypeBadge(challenge)}
+                      </td>
+                      <td className="p-3">
+                        <div className="font-mono text-white font-bold text-sm bg-slate-700/50 px-2 py-1 rounded inline-block">
+                          #{challenge.id}
+                        </div>
                       </td>
                       <td className="p-3">
                         <div className="font-medium text-white text-sm">{challenge.title}</div>
@@ -855,7 +861,12 @@ export default function AdminChallengePayouts() {
               <div className="space-y-6">
                 {/* Challenge Info */}
                 <div className="bg-slate-700/50 rounded-lg p-4">
-                  <h3 className="font-semibold text-white text-lg mb-2">{challenge.title}</h3>
+                  <div className="flex items-start justify-between mb-2">
+                    <h3 className="font-semibold text-white text-lg">{challenge.title}</h3>
+                    <div className="font-mono text-white font-bold text-lg bg-slate-600 px-3 py-1 rounded">
+                      ID: #{challenge.id}
+                    </div>
+                  </div>
                   <p className="text-slate-400 text-sm mb-3">{challenge.description || 'No description'}</p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                     <div>
@@ -936,6 +947,179 @@ export default function AdminChallengePayouts() {
                     </div>
                   </div>
                 </div>
+
+                {/* P2P Specific Details */}
+                {!challenge.adminCreated && (
+                  <div className="bg-slate-700/50 rounded-lg p-4">
+                    <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
+                      ⛓️ P2P Challenge Details
+                    </h4>
+                    <div className="space-y-4">
+                      {/* Challenge Type & Settlement */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                        <div className="bg-slate-800 p-3 rounded-lg">
+                          <div className="text-slate-400 text-xs mb-1">Challenge Type</div>
+                          <div className="text-white font-semibold capitalize">
+                            {challenge.challenged ? 'Direct P2P' : 'Open'}
+                          </div>
+                        </div>
+                        <div className="bg-slate-800 p-3 rounded-lg">
+                          <div className="text-slate-400 text-xs mb-1">Settlement</div>
+                          <div className="text-purple-400 font-semibold capitalize">
+                            {challenge.settlementType || 'Voting'}
+                          </div>
+                        </div>
+                        <div className="bg-slate-800 p-3 rounded-lg">
+                          <div className="text-slate-400 text-xs mb-1">Challenge ID</div>
+                          <div className="text-cyan-400 font-mono font-semibold">#{challenge.id}</div>
+                        </div>
+                        <div className="bg-slate-800 p-3 rounded-lg">
+                          <div className="text-slate-400 text-xs mb-1">Payment Token</div>
+                          <div className="text-white font-semibold">
+                            {challenge.paymentTokenAddress?.includes('0x0000000000000000000000000000000000000000') ? 'ETH' : 'USDC'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Staking Status */}
+                      <div className="border-t border-slate-600 pt-3">
+                        <div className="text-slate-400 text-sm font-semibold mb-2">Staking Status</div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className={`p-3 rounded-lg border-2 ${challenge.creatorStaked ? 'border-green-500 bg-green-600/10' : 'border-yellow-500 bg-yellow-600/10'}`}>
+                            <div className="text-xs mb-1">Creator (YES)</div>
+                            <div className={`text-sm font-bold ${challenge.creatorStaked ? 'text-green-400' : 'text-yellow-400'}`}>
+                              {challenge.creatorStaked ? '✅ Staked' : '⏳ Awaiting'}
+                            </div>
+                            {challenge.creatorTransactionHash && (
+                              <div className="text-xs text-slate-300 mt-1 truncate" title={challenge.creatorTransactionHash}>
+                                Tx: {challenge.creatorTransactionHash.slice(0, 12)}...
+                              </div>
+                            )}
+                          </div>
+                          <div className={`p-3 rounded-lg border-2 ${challenge.acceptorStaked ? 'border-green-500 bg-green-600/10' : 'border-yellow-500 bg-yellow-600/10'}`}>
+                            <div className="text-xs mb-1">Acceptor (NO)</div>
+                            <div className={`text-sm font-bold ${challenge.acceptorStaked ? 'text-green-400' : 'text-yellow-400'}`}>
+                              {challenge.acceptorStaked ? '✅ Staked' : '⏳ Awaiting'}
+                            </div>
+                            {challenge.acceptorTransactionHash && (
+                              <div className="text-xs text-slate-300 mt-1 truncate" title={challenge.acceptorTransactionHash}>
+                                Tx: {challenge.acceptorTransactionHash.slice(0, 12)}...
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Voting & Proof Status */}
+                      <div className="border-t border-slate-600 pt-3">
+                        <div className="text-slate-400 text-sm font-semibold mb-2">Voting & Proof</div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="bg-slate-800 p-3 rounded-lg">
+                            <div className="text-xs text-slate-400 mb-1">Creator Vote</div>
+                            <div className="text-sm text-white">
+                              {challenge.creatorVote ? (
+                                <>
+                                  <div className="font-semibold">
+                                    {challenge.creatorVote === challenge.challenger ? '✅ YES' : challenge.creatorVote === challenge.challenged ? '❌ NO' : '🤝 DRAW'}
+                                  </div>
+                                  {challenge.creatorProof && (
+                                    <div className="text-xs text-slate-400 mt-1">
+                                      Proof: {challenge.creatorProof.length > 30 ? challenge.creatorProof.slice(0, 30) + '...' : challenge.creatorProof}
+                                    </div>
+                                  )}
+                                </>
+                              ) : (
+                                <div className="text-yellow-400 text-xs">Pending vote...</div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="bg-slate-800 p-3 rounded-lg">
+                            <div className="text-xs text-slate-400 mb-1">Acceptor Vote</div>
+                            <div className="text-sm text-white">
+                              {challenge.acceptorVote ? (
+                                <>
+                                  <div className="font-semibold">
+                                    {challenge.acceptorVote === challenge.challenger ? '✅ YES' : challenge.acceptorVote === challenge.challenged ? '❌ NO' : '🤝 DRAW'}
+                                  </div>
+                                  {challenge.acceptorProof && (
+                                    <div className="text-xs text-slate-400 mt-1">
+                                      Proof: {challenge.acceptorProof.length > 30 ? challenge.acceptorProof.slice(0, 30) + '...' : challenge.acceptorProof}
+                                    </div>
+                                  )}
+                                </>
+                              ) : (
+                                <div className="text-yellow-400 text-xs">Pending vote...</div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Voting Countdown */}
+                      {challenge.votingEndsAt && (
+                        <div className="border-t border-slate-600 pt-3">
+                          <div className="text-slate-400 text-sm font-semibold mb-2">Voting Window</div>
+                          <div className="bg-slate-800 p-3 rounded-lg">
+                            <div className="text-white">
+                              {new Date(challenge.votingEndsAt) > new Date() ? (
+                                <>
+                                  <div className="text-orange-400 font-semibold">⏱️ Active</div>
+                                  <div className="text-xs text-slate-400 mt-1">
+                                    Ends in {formatDistanceToNow(new Date(challenge.votingEndsAt), { addSuffix: false })}
+                                  </div>
+                                  <div className="text-xs text-slate-500 mt-1">
+                                    {new Date(challenge.votingEndsAt).toLocaleString()}
+                                  </div>
+                                </>
+                              ) : (
+                                <>
+                                  <div className="text-red-400 font-semibold">❌ Closed</div>
+                                  <div className="text-xs text-slate-400 mt-1">
+                                    Ended {formatDistanceToNow(new Date(challenge.votingEndsAt), { addSuffix: true })}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Dispute Information */}
+                      {challenge.status === 'disputed' && (
+                        <div className="border-t border-slate-600 pt-3">
+                          <div className="text-slate-400 text-sm font-semibold mb-2">🚨 Dispute Information</div>
+                          <div className="bg-red-600/10 border border-red-500/30 p-3 rounded-lg">
+                            <div className="text-red-400 text-sm">
+                              {challenge.disputeReason || 'Dispute raised - awaiting admin resolution'}
+                            </div>
+                            <Button 
+                              className="mt-3 bg-red-600 hover:bg-red-700"
+                              onClick={() => {
+                                // Admin can click to view full dispute details
+                                console.log('Viewing full dispute details for challenge', challenge.id);
+                              }}
+                            >
+                              View Dispute Details
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Chat & Messages Link */}
+                      <div className="border-t border-slate-600 pt-3">
+                        <Button 
+                          className="w-full bg-blue-600 hover:bg-blue-700"
+                          onClick={() => {
+                            // Navigate to challenge chat view
+                            window.open(`/challenges/${challenge.id}`, '_blank');
+                          }}
+                        >
+                          📱 View Challenge Chat & Proofs
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Escrow & Payout Info */}
                 <div className="bg-slate-700/50 rounded-lg p-4">

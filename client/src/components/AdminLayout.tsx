@@ -90,6 +90,12 @@ const adminNavigation = [
     description: "User management and moderation"
   },
   { 
+    name: "Bantah Points", 
+    href: "/admin/points", 
+    icon: Trophy,
+    description: "Track and manage BPTS distribution"
+  },
+  { 
     name: "Analytics", 
     href: "/admin/analytics", 
     icon: BarChart3,

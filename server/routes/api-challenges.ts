@@ -316,7 +316,7 @@ router.post('/create-admin', PrivyAuthMiddleware, async (req: Request, res: Resp
  */
 router.post('/create-p2p', PrivyAuthMiddleware, upload.single('coverImage'), async (req: Request, res: Response) => {
   try {
-    const { opponentId, stakeAmount, paymentToken, metadataURI, title, description, challengeType, dueDate, transactionHash, side } = req.body;
+    const { opponentId, stakeAmount, paymentToken, metadataURI, title, description, challengeType, dueDate, transactionHash, side, settlementType } = req.body;
     const userId = req.user?.id || req.user?.sub || (req.user?.claims?.sub);
 
     console.log(`\n📨 POST /api/challenges/create-p2p`);
@@ -386,12 +386,49 @@ router.post('/create-p2p', PrivyAuthMiddleware, upload.single('coverImage'), asy
         creatorStaked: false,
         acceptorStaked: false,
         pointsAwarded: creationPoints,
-        settlementType: 'voting',
+        settlementType: settlementType || 'voting',
       })
       .returning();
 
     const challengeId = dbChallenge[0].id;
     console.log(`✅ ${type} challenge created off-chain in DB: ${challengeId}`);
+
+    // Award creation points to the creator
+    try {
+      const pointsWei = BigInt(Math.floor(creationPoints * 1e18));
+      console.log(`🎁 Challenge creator will earn ${creationPoints} Bantah Points`);
+      
+      await recordPointsTransaction({
+        userId,
+        challengeId: String(challengeId),
+        transactionType: 'creation_reward',
+        amount: pointsWei.toString(),
+        reason: `Created P2P challenge: "${title}"`,
+        blockchainTxHash: null,
+        createdAt: new Date(),
+      });
+      
+      console.log(`✅ Points transaction recorded: ${creationPoints} points to creator`);
+    } catch (pointsError) {
+      console.error('Failed to record creation points:', pointsError);
+      // Don't throw - continue even if points recording fails
+    }
+
+    // Send Points Earned notification to creator
+    try {
+      await notificationService.send({
+        userId,
+        challengeId: String(challengeId),
+        event: NotificationEvent.POINTS_EARNED,
+        title: '🎁 Points Earned!',
+        body: `You earned ${creationPoints} Bantah Points for creating "${title}"!`,
+        channels: [NotificationChannel.IN_APP, NotificationChannel.PUSH],
+        priority: NotificationPriority.MEDIUM,
+        data: { actionUrl: `/wallet`, pointsEarned: creationPoints, challengeId },
+      });
+    } catch (notifError) {
+      console.error('Failed to send points notification to creator:', notifError);
+    }
 
     // Send notifications:
     // - Open challenges: broadcast CHALLENGE_CREATED to active users (FCFS)

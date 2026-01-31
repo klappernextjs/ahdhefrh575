@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
-import { useBlockchainChallenge } from "@/hooks/useBlockchainChallenge";
 import { cn } from "@/lib/utils";
 import { getGlobalChannel } from "@/lib/pusher";
 import { MobileNavigation } from "@/components/MobileNavigation";
@@ -112,6 +111,7 @@ export default function Challenges() {
     paymentToken: 'USDC' as 'ETH' | 'USDT' | 'USDC', // Token selection
     side: 'YES' as 'YES' | 'NO', // Creator's chosen side
     coverImage: null as File | null,
+    settlementMethod: 'voting' as 'voting' | 'uma',
   });
 
   const handleCoverImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -288,8 +288,6 @@ export default function Challenges() {
     };
   }, [queryClient]);
 
-  const { createP2PChallenge } = useBlockchainChallenge();
-
   // Token address mapping for Base Sepolia
   // NOTE: Use address(0) for native ETH
   const TOKEN_ADDRESSES: Record<'ETH' | 'USDT' | 'USDC', string> = {
@@ -313,59 +311,22 @@ export default function Challenges() {
         throw new Error('Please select an opponent for direct challenges');
       }
 
-      // Convert amount to wei based on token decimals: ETH = 18 decimals, USDC/USDT = 6 decimals
-      const decimals = formData.paymentToken === 'ETH' ? 1e18 : 1e6;
-      const stakeWeiValue = String(Math.floor(formData.amount * decimals));
-      const pointsRewardValue = "500";
-
       // Get selected token address
       const selectedTokenAddress = TOKEN_ADDRESSES[formData.paymentToken];
 
-      console.log(`📝 Creating ${formData.paymentToken} challenge:`);
+      console.log(`📝 Creating ${formData.paymentToken} challenge (OFF-CHAIN):`);
       console.log(`   Amount: ${formData.amount} ${formData.paymentToken}`);
-      console.log(`   Stake (wei): ${stakeWeiValue}`);
-      console.log(`   Decimals: ${decimals}`);
+      console.log(`   Type: ${formData.challengeType}`);
+      console.log(`   Settlement: ${formData.settlementMethod}`);
 
-      // Check if opponent has a connected wallet (for direct P2P challenges)
-      let txResult = null;
-      const opponentHasWallet = formData.challengeType === 'open' || !!preSelectedUser?.primaryWalletAddress;
-      
-      if (opponentHasWallet || formData.challengeType === 'open') {
-        // Blockchain signing is optional for P2P with users without wallets
-        toast({
-          title: "Creating Challenge",
-          description: `Please sign the transaction in your wallet (${formData.paymentToken})...`,
-        });
+      // NEW MODEL: Challenge creation is OFF-CHAIN only
+      // On-chain staking happens later via prepare-stake → sign → /accept-stake flow
+      toast({
+        title: "Creating Challenge",
+        description: "Setting up your challenge...",
+      });
 
-        // For open challenges, use zero address to indicate "anyone can join"
-        const opponentAddress = formData.challengeType === 'open' 
-          ? '0x0000000000000000000000000000000000000000' // Zero address for open challenges
-          : preSelectedUser?.primaryWalletAddress; // Use wallet address if available
-
-        if (opponentAddress) {
-          try {
-            txResult = await createP2PChallenge({
-              opponentAddress,
-              stakeAmount: stakeWeiValue,
-              paymentToken: selectedTokenAddress,
-              pointsReward: pointsRewardValue,
-              metadataURI: 'ipfs://bafytest',
-            });
-          } catch (blockchainError: any) {
-            console.warn('Blockchain signing failed, continuing with DB-only challenge:', blockchainError.message);
-            // Don't throw - allow challenge creation even if blockchain signing fails
-          }
-        }
-      } else {
-        console.log('⏭️  Skipping blockchain signing for P2P challenge (opponent has no wallet)');
-        toast({
-          title: "Creating Challenge",
-          description: "Challenge will be created and sent to opponent...",
-        });
-      }
-
-      // Step 2: Store challenge in database
-      // Use FormData to support file uploads
+      // Step 2: Store challenge in database (OFF-CHAIN only)
       const requestBody = new FormData();
       // Ensure opponentId is always sent as a string (avoid numeric/string mismatches)
       requestBody.append('opponentId', formData.challengeType === 'direct' ? String(preSelectedUser?.id || '') : '');
@@ -376,8 +337,10 @@ export default function Challenges() {
       requestBody.append('dueDate', formData.dueDate || '');
       requestBody.append('metadataURI', 'ipfs://bafytest');
       requestBody.append('challengeType', formData.challengeType);
-      requestBody.append('transactionHash', txResult?.transactionHash || '');
+      requestBody.append('transactionHash', ''); // No tx hash for off-chain creation
       requestBody.append('side', formData.side);
+      requestBody.append('settlementType', formData.settlementMethod || 'voting');
+      requestBody.append('settlementType', formData.settlementMethod || 'voting');
       if (formData.coverImage) {
         requestBody.append('coverImage', formData.coverImage);
       }
@@ -439,7 +402,7 @@ export default function Challenges() {
       queryClient.invalidateQueries({ queryKey: ["/api/challenges"] });
       setIsCreateDialogOpen(false);
       setAmountInput('');
-      setCreateFormData({ title: '', description: '', category: 'trading', amount: 0, challengeType: 'open', opponentId: null, dueDate: '', paymentToken: 'USDC', side: 'YES', coverImage: null });
+      setCreateFormData({ title: '', description: '', category: 'trading', amount: 0, challengeType: 'open', opponentId: null, dueDate: '', paymentToken: 'USDC', side: 'YES', coverImage: null, settlementMethod: 'voting' });
       setCoverImagePreview(null);
       setPreSelectedUser(null);
     },
@@ -926,6 +889,39 @@ export default function Challenges() {
                 </button>
               </div>
             </div>
+
+            {/* Settlement Method - show once title entered and side chosen */}
+            {createFormData.title.trim().length > 0 && createFormData.side && (
+              <div className="mt-1">
+                <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400 block mb-1">Settlement Method</label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCreateFormData({ ...createFormData, settlementMethod: 'voting' })}
+                    className={cn(
+                      "flex-1 text-xs px-2 py-2 rounded-lg border transition-all",
+                      createFormData.settlementMethod === 'voting'
+                        ? 'bg-[#0ea5a2]/10 border-teal-400 text-teal-600 font-semibold'
+                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600'
+                    )}
+                  >
+                    Voting
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCreateFormData({ ...createFormData, settlementMethod: 'uma' })}
+                    className={cn(
+                      "flex-1 text-xs px-2 py-2 rounded-lg border transition-all",
+                      createFormData.settlementMethod === 'uma'
+                        ? 'bg-[#7440FF]/10 border-purple-500 text-purple-600 font-semibold'
+                        : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600'
+                    )}
+                  >
+                    UMA Protocol
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Bet Amount Section */}
             <div>

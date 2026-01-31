@@ -26,6 +26,7 @@ export function getCurrencySymbol(tokenAddress?: string): string {
   const USDC_ADDRESSES = [
     "0x833589fcd6edb6e08f4c7c32d4f71b3566da8860", // Base Mainnet
     "0x1c7d4b196cb0c7b01d743fbc6116a792bf68cf5d", // Base Testnet (Sepolia)
+    "0x036cbd53842c5426634e7929541ec2318f3dcf7e", // USDC (Base Sepolia - local mapping)
     "0x41e94cb5eb3092ec94a15db6b9123d1b2850b422", // Polygon
     "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", // Ethereum Mainnet
     "0xaf88d065e77c8cc2239327c5edb3a432268e5831", // Arbitrum One
@@ -68,6 +69,7 @@ export function getCurrencyLogo(tokenAddress?: string): string {
   const USDC_ADDRESSES = [
     "0x833589fcd6edb6e08f4c7c32d4f71b3566da8860", // Base Mainnet
     "0x1c7d4b196cb0c7b01d743fbc6116a792bf68cf5d", // Base Testnet (Sepolia)
+    "0x036cbd53842c5426634e7929541ec2318f3dcf7e", // USDC (Base Sepolia - local mapping)
     "0x41e94cb5eb3092ec94a15db6b9123d1b2850b422", // Polygon
     "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", // Ethereum Mainnet
     "0xaf88d065e77c8cc2239327c5edb3a432268e5831", // Arbitrum One

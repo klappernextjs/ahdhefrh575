@@ -53,6 +53,7 @@ import AdminAnalytics from "./pages/AdminAnalytics";
 import AdminBonusConfiguration from "./pages/AdminBonusConfiguration";
 import AdminNotifications from "@/pages/AdminNotifications";
 import AdminUsersManagement from "./pages/AdminUsersManagement";
+import AdminBantahPoints from "./pages/AdminBantahPoints";
 import AdminSettings from "./pages/AdminSettings";
 import AdminWallet from "./pages/AdminWallet";
 
@@ -142,6 +143,7 @@ function AppRouter() {
         <Route path="/admin/payouts" component={AdminPayouts} />
         <Route path="/admin/transactions" component={AdminTransactions} />
         <Route path="/admin/users" component={AdminUsersManagement} />
+        <Route path="/admin/points" component={AdminBantahPoints} />
         <Route path="/admin/analytics" component={AdminAnalytics} />
         <Route path="/admin/bonuses" component={AdminBonusConfiguration} />
         <Route path="/admin/wallet" component={AdminWallet} />
