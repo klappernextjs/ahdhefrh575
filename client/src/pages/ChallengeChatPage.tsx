@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/useAuth";
 import ProfileCard from "@/components/ProfileCard";
+import ConfirmAndStakeButton from '@/components/ConfirmAndStakeButton';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -60,6 +61,12 @@ interface Challenge {
     firstName?: string;
     profileImageUrl?: string;
   };
+  // Escrow/voting gating fields (from API)
+  chatOpen?: boolean;
+  countdownSeconds?: number;
+  votingEndsAt?: string;
+  creatorStaked?: boolean;
+  acceptorStaked?: boolean;
 }
 
 export default function ChallengeChatPage() {
@@ -79,6 +86,7 @@ export default function ChallengeChatPage() {
     enabled: !!challengeId,
     retry: false,
   });
+  const [liveCountdown, setLiveCountdown] = useState<number | null>(null);
   
   // Check if this is a P2P challenge (has both challenger and challenged users)
   const isP2PChallenge = !!(challenge?.challengerUser && challenge?.challengedUser);
@@ -95,6 +103,31 @@ export default function ChallengeChatPage() {
       setActiveTab('matches');
     }
   }, [shouldHideCommentsTab, activeTab]);
+
+  // Live countdown when votingEndsAt is available
+  useEffect(() => {
+    let timer: any = null;
+    const compute = () => {
+      if (!challenge) {
+        setLiveCountdown(null);
+        return;
+      }
+      if (challenge.votingEndsAt) {
+        const ends = new Date(challenge.votingEndsAt).getTime();
+        const now = Date.now();
+        const diff = Math.max(0, Math.floor((ends - now) / 1000));
+        setLiveCountdown(diff);
+      } else if (typeof (challenge as any).countdownSeconds === 'number') {
+        setLiveCountdown((challenge as any).countdownSeconds);
+      } else {
+        setLiveCountdown(null);
+      }
+    };
+
+    compute();
+    timer = setInterval(compute, 1000);
+    return () => clearInterval(timer);
+  }, [challenge]);
 
   const { data: messages = [], refetch: refetchMessages } = useQuery<ExtendedMessage[]>({
     queryKey: [`/api/challenges/${challengeId}/messages`],
@@ -240,6 +273,37 @@ export default function ChallengeChatPage() {
                   <p className="text-white/80 line-clamp-1">{challenge.description}</p>
                 )}
               </div>
+            </div>
+            {/* Chat gating / stake actions */}
+            <div className="px-4 py-3 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900">
+              {challenge?.chatOpen ? (
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm text-green-600">Chat is open — you can message your opponent.</div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm text-yellow-700">
+                    {liveCountdown != null && liveCountdown > 0 ? (
+                      <>
+                        Chat opens in {Math.floor(liveCountdown / 60)}m {liveCountdown % 60}s
+                      </>
+                    ) : liveCountdown === 0 ? (
+                      <>Chat opens any moment...</>
+                    ) : (
+                      <>Chat is locked until both participants stake.</>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {/* Show stake buttons for participants who haven't staked yet */}
+                    {user && challenge && user.id === challenge.challengerUser?.id && !challenge.creatorStaked && (
+                      <ConfirmAndStakeButton challengeId={challenge.id} role="creator" />
+                    )}
+                    {user && challenge && user.id === challenge.challengedUser?.id && !challenge.acceptorStaked && (
+                      <ConfirmAndStakeButton challengeId={challenge.id} role="acceptor" />
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

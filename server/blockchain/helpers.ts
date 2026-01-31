@@ -91,39 +91,13 @@ export async function createP2PChallenge(
   metadataURI: string,
   userSigner: Signer
 ) {
-  const client = getBlockchainClient();
-  try {
-    const contract = client.getChallengeFactoryForUser(userSigner);
-    const stakeWei = ethers.parseUnits(stakeAmount, 6);
-
-    const tx = await contract.createP2PChallenge(
-      opponent,
-      stakeWei,
-      paymentToken,
-      metadataURI
-    );
-
-    const receipt = await tx.wait();
-
-    const event = receipt.logs
-      .map((log: any) => {
-        try {
-          return contract.interface.parseLog(log);
-        } catch {
-          return null;
-        }
-      })
-      .find((e: any) => e?.name === 'ChallengeCreated');
-
-    return {
-      transactionHash: receipt.transactionHash,
-      blockNumber: receipt.blockNumber,
-      challengeId: event ? Number(event.args.challengeId) : null,
-    };
-  } catch (error) {
-    console.error('Failed to create P2P challenge:', error);
-    throw error;
-  }
+  // DEPRECATED: Server-side creation of P2P challenges is no longer supported.
+  // Clients MUST perform the on-chain `createP2PChallenge` transaction using
+  // the user's wallet (web3 provider). After the on-chain tx is confirmed,
+  // the client should call the backend to record the transaction hash if needed.
+  const msg = 'Deprecated: server-side createP2PChallenge removed. Call on-chain from client.';
+  console.warn(msg);
+  throw new Error(msg);
 }
 
 /**
@@ -159,21 +133,13 @@ export async function acceptP2PChallenge(
   challengeId: number,
   userSigner: Signer
 ) {
-  const client = getBlockchainClient();
-  try {
-    const contract = client.getChallengeFactoryForUser(userSigner);
-
-    const tx = await contract.acceptP2PChallenge(challengeId);
-    const receipt = await tx.wait();
-
-    return {
-      transactionHash: receipt.transactionHash,
-      blockNumber: receipt.blockNumber,
-    };
-  } catch (error) {
-    console.error(`Failed to accept challenge ${challengeId}:`, error);
-    throw error;
-  }
+  // DEPRECATED: Server-side accept wrapper. Clients must call `acceptP2PChallenge`
+  // on-chain using the user's wallet and then POST the resulting transaction
+  // hash to the server (`/api/challenges/:id/accept-stake`) so the backend can
+  // record the stake and advance state.
+  const msg = 'Deprecated: server-side acceptP2PChallenge removed. Call on-chain from client.';
+  console.warn(msg);
+  throw new Error(msg);
 }
 
 /**

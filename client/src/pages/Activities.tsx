@@ -28,6 +28,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import ConfirmAndStakeButton from '@/components/ConfirmAndStakeButton';
 
 function ActivityCardSkeleton() {
   return (
@@ -369,6 +370,25 @@ export default function Activities() {
   });
 
   const ActivityCard = ({ activity }: { activity: any }) => {
+    const [isDeclining, setIsDeclining] = useState(false);
+    const [countdownSeconds, setCountdownSeconds] = useState<number | null>(null);
+    // Live countdown for activities with votingEndsAt
+    useEffect(() => {
+      let t: any = null;
+      const compute = () => {
+        if (!activity || !activity.votingEndsAt) {
+          setCountdownSeconds(null);
+          return;
+        }
+        const ends = new Date(activity.votingEndsAt).getTime();
+        const now = Date.now();
+        const diff = Math.max(0, Math.floor((ends - now) / 1000));
+        setCountdownSeconds(diff);
+      };
+      compute();
+      t = setInterval(compute, 1000);
+      return () => clearInterval(t);
+    }, [activity]);
     const tokenSymbol = getTokenSymbol(activity);
     const challengedUser = activity.type === "challenge" 
       ? (activity.challengedUser || activity.opponent)
@@ -459,22 +479,63 @@ export default function Activities() {
                 <span className="hidden sm:inline sm:ml-1">Edit</span>
               </Button>
             )}
-            <Button
-              style={{ backgroundColor: "#7440ff", color: "white" }}
-              size="sm"
-              className="h-7 px-2 text-xs"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (activity.type === "challenge") {
-                  navigate(`/challenge/${activity.id}`);
-                } else if (activity.type === "event") {
-                  navigate(`/event/${activity.id}`);
-                }
-              }}
-            >
-              <MessageCircle className="w-3 h-3" />
-              <span className="hidden sm:inline sm:ml-1">Chat</span>
-            </Button>
+            {activity.type === 'challenge' && activity.status === 'open' && user && user.id !== activity.challenger ? (
+              <div className="flex items-center gap-2">
+                <ConfirmAndStakeButton challengeId={activity.id} role="acceptor" />
+                <button
+                  className="h-7 px-2 rounded text-sm bg-red-100 text-red-700"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    if (!confirm('Decline this challenge?')) return;
+                    setIsDeclining(true);
+                    try {
+                      const res = await fetch(`/api/challenges/${activity.id}`, {
+                        method: 'PATCH',
+                        credentials: 'include',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ status: 'cancelled' }),
+                      });
+                      if (!res.ok) throw new Error('Failed to decline');
+                      queryClient.invalidateQueries({ queryKey: ['/api/challenges'] });
+                      toast({ title: 'Challenge declined' });
+                    } catch (err: any) {
+                      toast({ title: 'Decline failed', description: err.message || String(err), variant: 'destructive' });
+                    } finally {
+                      setIsDeclining(false);
+                    }
+                  }}
+                  disabled={isDeclining}
+                >
+                  {isDeclining ? 'Declining...' : 'Decline'}
+                </button>
+              </div>
+            ) : (
+              <Button
+                style={{ backgroundColor: "#7440ff", color: "white" }}
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (activity.type === "challenge") {
+                    navigate(`/challenge/${activity.id}`);
+                  } else if (activity.type === "event") {
+                    navigate(`/event/${activity.id}`);
+                  }
+                }}
+              >
+                <MessageCircle className="w-3 h-3" />
+                <span className="hidden sm:inline sm:ml-1">Chat</span>
+              </Button>
+            )}
+            {countdownSeconds != null && (
+              <div className="text-xs text-yellow-700 ml-2 flex items-center">
+                {countdownSeconds > 0 ? (
+                  <>Ends in {Math.floor(countdownSeconds / 60)}m {countdownSeconds % 60}s</>
+                ) : (
+                  <>Ending soon</>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </CardContent>

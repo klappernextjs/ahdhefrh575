@@ -1,3 +1,4 @@
+import { getBlockchainClient } from '../blockchain/client';
 /**
  * Phase 4: API Routes - Challenge Operations
  * REST endpoints for challenge creation, joining, and management
@@ -392,6 +393,52 @@ router.post('/create-p2p', PrivyAuthMiddleware, upload.single('coverImage'), asy
     const challengeId = dbChallenge[0].id;
     console.log(`✅ ${type} challenge created off-chain in DB: ${challengeId}`);
 
+    // Send notifications:
+    // - Open challenges: broadcast CHALLENGE_CREATED to active users (FCFS)
+    // - Direct P2P: notify the specified opponent immediately (MATCH_FOUND)
+    try {
+      if (isOpenChallenge) {
+        const activeUsers = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.status, 'active'));
+
+        for (const u of activeUsers) {
+          try {
+            await notificationService.send({
+              userId: u.id,
+              challengeId: String(challengeId),
+              event: NotificationEvent.CHALLENGE_CREATED,
+              title: 'New challenge available — first to accept!',
+              body: `${req.user?.username || 'A user'} created "${title}" — first to accept can stake.`,
+              channels: [NotificationChannel.IN_APP, NotificationChannel.PUSH],
+              priority: NotificationPriority.MEDIUM,
+              data: { actionUrl: `/challenges/${challengeId}`, challengeId },
+            });
+          } catch (err) {
+            console.error('Failed to send open-challenge notification to user', u.id, err);
+          }
+        }
+      } else if (opponentId) {
+        try {
+          await notificationService.send({
+            userId: opponentId,
+            challengeId: String(challengeId),
+            event: NotificationEvent.MATCH_FOUND,
+            title: 'You were challenged!',
+            body: `${req.user?.username || 'Someone'} challenged you to "${title}" — tap to accept or decline.`,
+            channels: [NotificationChannel.PUSH, NotificationChannel.IN_APP],
+            priority: NotificationPriority.HIGH,
+            data: { actionUrl: `/challenges/${challengeId}`, challengeId },
+          });
+        } catch (err) {
+          console.error('Failed to notify direct opponent', opponentId, err);
+        }
+      }
+    } catch (err) {
+      console.error('Error while dispatching challenge notifications:', err);
+    }
+
     res.json({
       success: true,
       challengeId,
@@ -407,6 +454,80 @@ router.post('/create-p2p', PrivyAuthMiddleware, upload.single('coverImage'), asy
  * Opponent accepts and stakes on-chain
  */
 router.post('/:id/accept-stake', PrivyAuthMiddleware, async (req: Request, res: Response) => {
+
+  /**
+   * POST /api/challenges/:id/prepare-stake
+   * Returns a prefilled transaction payload for the client wallet to sign
+   * Body: { role?: 'creator'|'acceptor' } (optional) - server will infer when possible
+   */
+  router.post('/:id/prepare-stake', PrivyAuthMiddleware, async (req: Request, res: Response) => {
+    try {
+      const challengeId = parseInt(req.params.id);
+      const userId = req.user?.id;
+      const { role } = req.body || {};
+
+      if (!userId) return res.status(401).json({ error: 'Not authenticated' });
+
+      const dbChallenge = await db.select().from(challenges).where(eq(challenges.id, challengeId)).limit(1);
+      if (!dbChallenge.length) return res.status(404).json({ error: 'Challenge not found' });
+
+      const challenge = dbChallenge[0];
+
+      const client = getBlockchainClient();
+      const factoryAddress = client.getContractAddresses().challengeFactory;
+
+      // Determine role
+      let effectiveRole: 'creator' | 'acceptor';
+      if (role === 'creator' || role === 'acceptor') effectiveRole = role;
+      else effectiveRole = (userId === challenge.challenger) ? 'creator' : 'acceptor';
+
+      // Payment token and value
+      const zeroAddr = '0x0000000000000000000000000000000000000000';
+      const paymentToken = challenge.paymentTokenAddress || zeroAddr;
+      const stakeWei = challenge.stakeAmountWei ? BigInt(challenge.stakeAmountWei) : BigInt(0);
+
+      const iface = client.challengeFactoryContract.interface;
+
+      if (effectiveRole === 'acceptor') {
+        // Prepare acceptP2PChallenge(uint256 challengeId)
+        const data = iface.encodeFunctionData('acceptP2PChallenge', [challengeId]);
+        const value = (paymentToken.toLowerCase() === zeroAddr) ? '0x' + stakeWei.toString(16) : '0x0';
+
+        return res.json({
+          to: factoryAddress,
+          data,
+          value,
+          chainId: (await client.getNetworkInfo()).chainId,
+        });
+      }
+
+      // Creator: prepare createP2PChallenge(opponent, stakeAmount, paymentToken, metadataURI)
+      if (!challenge.challenged) {
+        return res.status(400).json({ error: 'No acceptor assigned yet for creator confirm' });
+      }
+
+      // Get primary wallet address of acceptor
+      const primary = await dbGetUserPrimaryWallet(challenge.challenged);
+      if (!primary || !primary.walletAddress) {
+        return res.status(400).json({ error: 'Acceptor does not have a primary wallet address' });
+      }
+
+      const opponentAddr = primary.walletAddress;
+      const metadataURI = '';
+      const data = iface.encodeFunctionData('createP2PChallenge', [opponentAddr, stakeWei, paymentToken, metadataURI]);
+      const value = (paymentToken.toLowerCase() === zeroAddr) ? '0x' + stakeWei.toString(16) : '0x0';
+
+      return res.json({
+        to: factoryAddress,
+        data,
+        value,
+        chainId: (await client.getNetworkInfo()).chainId,
+      });
+    } catch (error: any) {
+      console.error('Failed to prepare stake tx:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
   try {
     const { transactionHash } = req.body;
     const challengeId = parseInt(req.params.id);
@@ -425,6 +546,51 @@ router.post('/:id/accept-stake', PrivyAuthMiddleware, async (req: Request, res: 
       acceptorTransactionHash: transactionHash,
       onChainStatus: 'matching', // Someone has staked
     }).where(eq(challenges.id, challengeId));
+
+    // If creator already staked, move to active and start countdown
+    const updated = await db.select().from(challenges).where(eq(challenges.id, challengeId)).limit(1);
+    const uc = updated[0];
+    if (uc.creatorStaked && uc.acceptorStaked) {
+      // compute original duration if set, otherwise default 24h
+      const createdAt = uc.createdAt ? new Date(uc.createdAt).getTime() : Date.now();
+      const origDue = uc.dueDate ? new Date(uc.dueDate).getTime() : createdAt + 24 * 60 * 60 * 1000;
+      const origDuration = Math.max(origDue - createdAt, 15 * 60 * 1000); // min 15m
+      const newVotingEndsAt = new Date(Date.now() + origDuration);
+
+      await db.update(challenges).set({
+        status: 'active',
+        onChainStatus: 'active',
+        votingEndsAt: newVotingEndsAt,
+      }).where(eq(challenges.id, challengeId));
+
+      // Notify both participants that challenge is active and chat is open
+      try {
+        await notificationService.send({
+          userId: uc.challenger,
+          challengeId: challengeId.toString(),
+          event: NotificationEvent.CHALLENGE_JOINED_FRIEND,
+          title: `⚔️ Challenge is active!`,
+          body: `Your challenge has been matched and is now active. Chat is open and countdown started.`,
+          channels: [NotificationChannel.IN_APP],
+          priority: NotificationPriority.HIGH,
+          data: { challengeId }
+        });
+        if (uc.challenged) {
+          await notificationService.send({
+            userId: uc.challenged,
+            challengeId: challengeId.toString(),
+            event: NotificationEvent.CHALLENGE_JOINED_FRIEND,
+            title: `⚔️ Challenge is active!`,
+            body: `Challenge is active. Chat is open and countdown started.`,
+            channels: [NotificationChannel.IN_APP],
+            priority: NotificationPriority.HIGH,
+            data: { challengeId }
+          });
+        }
+      } catch (notifyErr) {
+        console.warn('Failed to notify participants of active challenge:', notifyErr);
+      }
+    }
 
     res.json({ success: true, message: 'Stake recorded. Waiting for creator to confirm and stake.' });
   } catch (error: any) {
@@ -445,13 +611,27 @@ router.post('/:id/creator-confirm-stake', PrivyAuthMiddleware, async (req: Reque
     const challenge = await db.select().from(challenges).where(eq(challenges.id, challengeId)).limit(1);
     if (!challenge.length) return res.status(404).json({ error: 'Challenge not found' });
     if (challenge[0].challenger !== userId) return res.status(403).json({ error: 'Only creator can confirm' });
-
+    // Mark creator as staked
     await db.update(challenges).set({
       creatorStaked: true,
       creatorTransactionHash: transactionHash,
-      status: 'active', // Both have staked
-      onChainStatus: 'active',
     }).where(eq(challenges.id, challengeId));
+
+    // If acceptor already staked, activate and start countdown
+    const updated = await db.select().from(challenges).where(eq(challenges.id, challengeId)).limit(1);
+    const uc = updated[0];
+    if (uc.acceptorStaked && uc.creatorStaked) {
+      const createdAt = uc.createdAt ? new Date(uc.createdAt).getTime() : Date.now();
+      const origDue = uc.dueDate ? new Date(uc.dueDate).getTime() : createdAt + 24 * 60 * 60 * 1000;
+      const origDuration = Math.max(origDue - createdAt, 15 * 60 * 1000);
+      const newVotingEndsAt = new Date(Date.now() + origDuration);
+
+      await db.update(challenges).set({
+        status: 'active',
+        onChainStatus: 'active',
+        votingEndsAt: newVotingEndsAt,
+      }).where(eq(challenges.id, challengeId));
+    }
 
 /**
  * POST /api/challenges/:id/vote
@@ -713,64 +893,14 @@ router.post('/:id/accept', PrivyAuthMiddleware, async (req: Request, res: Respon
       });
     }
 
-    // Accept on-chain
-    const txResult = await acceptP2PChallenge(challengeId, req.user as any);
+    // DEPRECATED: server-side on-chain acceptance has been removed.
+    // Clients MUST perform the on-chain `acceptP2PChallenge` transaction
+    // using the user's wallet, then POST the resulting transaction hash
+    // to `/api/challenges/:id/accept-stake` so the backend can record it.
 
-    // Record escrow
-    if (challenge.stakeAmountWei) {
-      await createEscrowRecord({
-        challengeId,
-        userId,
-        tokenAddress: challenge.paymentTokenAddress!,
-        amountEscrowed: challenge.stakeAmountWei,
-        status: 'locked',
-        side: 'CHALLENGER', // They're the acceptor
-        lockTxHash: txResult.transactionHash,
-      });
-    }
-
-    // Update challenge
-    await db
-      .update(challenges)
-      .set({
-        status: 'active',
-        onChainStatus: 'active',
-      })
-      .where(eq(challenges.id, challengeId));
-
-    console.log(`✅ P2P challenge accepted: ${txResult.transactionHash}`);
-
-    // Get acceptor name for notification
-    const acceptor = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-    const acceptorName = acceptor[0]?.firstName || 'Someone';
-
-    // Send notification to challenger that their challenge was accepted
-    if (challenge.challenger) {
-      await notificationService.send({
-        userId: challenge.challenger,
-        challengeId: challengeId.toString(),
-        event: NotificationEvent.CHALLENGE_JOINED_FRIEND,
-        title: `⚔️ ${acceptorName} accepted your challenge!`,
-        body: `${acceptorName} accepted your challenge: "${challenge.title}"`,
-        channels: [NotificationChannel.IN_APP, NotificationChannel.PUSH],
-        priority: NotificationPriority.MEDIUM,
-        data: {
-          challengeId: challengeId,
-          title: challenge.title,
-          acceptor: userId,
-        },
-      }).catch(err => {
-        console.warn('Failed to send acceptance notification:', err.message);
-        // Don't fail the challenge acceptance if notification fails
-      });
-
-      console.log(`📬 Notification sent to challenger ${challenge.challenger}`);
-    }
-
-    res.json({
-      success: true,
-      challengeId,
-      transactionHash: txResult.transactionHash,
+    return res.status(410).json({
+      error: 'Deprecated endpoint',
+      message: 'Server-side on-chain accept removed. Call accept on-chain from the client, then POST /api/challenges/:id/accept-stake with the transactionHash.',
     });
   } catch (error: any) {
     console.error('Failed to accept challenge:', error);
@@ -859,12 +989,24 @@ router.get('/:id', PrivyAuthMiddleware, async (req: Request, res: Response) => {
       console.warn('Could not fetch on-chain data:', error);
     }
 
+    // Compute chat gating: chat opens only when both parties have staked and status is active
+    const now = Date.now();
+    const chatOpen = Boolean(challenge.creatorStaked && challenge.acceptorStaked && challenge.status === 'active');
+    let countdownSeconds = null;
+    if (chatOpen && challenge.votingEndsAt) {
+      const ends = new Date(challenge.votingEndsAt).getTime();
+      countdownSeconds = Math.max(0, Math.floor((ends - now) / 1000));
+    }
+
     res.json({
       ...challenge,
       challengerUser,
       challengedUser,
       onChainData,
       participants,
+      chatOpen,
+      countdownSeconds,
+      votingEndsAt: challenge.votingEndsAt || null,
     });
   } catch (error: any) {
     res.status(500).json({

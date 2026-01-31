@@ -29,6 +29,7 @@ import { getAvatarUrl } from "@/utils/avatarUtils";
 import { useLocation } from "wouter";
 import { useState } from "react";
 import ProfileCard from "@/components/ProfileCard";
+import ConfirmAndStakeButton from '@/components/ConfirmAndStakeButton';
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 // Simple category -> emoji/icon mapping
@@ -496,33 +497,32 @@ export function ChallengeCard({
           <div className="flex items-center gap-0.5 flex-shrink-0 flex-wrap">
             <div onClick={(e) => e.stopPropagation()} className="flex items-center gap-0.5">
               {challenge.status === "open" && !challenge.adminCreated && !challenge.challenged && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (!isAuthenticated) {
-                      toast({
-                        title: "Authentication Required",
-                        description: "Please log in to accept challenges",
-                      });
-                      login();
-                      return;
-                    }
-                    if (user?.id === challenge.challenger) {
-                      toast({
-                        title: "Cannot Accept",
-                        description: "You cannot accept your own challenge",
-                        variant: "destructive",
-                      });
-                      return;
-                    }
-                    setShowAcceptModal(true);
-                  }}
-                  disabled={!isAuthenticated || user?.id === challenge.challenger}
-                  className="bg-emerald-600 dark:bg-emerald-700 hover:bg-emerald-700 dark:hover:bg-emerald-600 text-white border-none text-[10px] px-2 py-0.5 rounded-md font-semibold transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Accept this challenge"
-                >
-                  ⚔️ Accept
-                </button>
+                <div>
+                  {!isAuthenticated ? (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toast({
+                          title: "Authentication Required",
+                          description: "Please log in to accept challenges",
+                        });
+                        login();
+                      }}
+                      className="bg-emerald-600 dark:bg-emerald-700 hover:bg-emerald-700 dark:hover:bg-emerald-600 text-white border-none text-[10px] px-2 py-0.5 rounded-md font-semibold transition-all"
+                    >
+                      ⚔️ Accept
+                    </button>
+                  ) : user?.id === challenge.challenger ? (
+                    <button
+                      className="bg-emerald-600 dark:bg-emerald-700 text-white text-[10px] px-2 py-0.5 rounded-md font-semibold opacity-50 cursor-not-allowed"
+                      title="Cannot accept your own challenge"
+                    >
+                      ⚔️ Accept
+                    </button>
+                  ) : (
+                    <ConfirmAndStakeButton challengeId={challenge.id} role="acceptor" />
+                  )}
+                </div>
               )}
               {challenge.status !== "open" && challenge.status !== "pending" && getStatusBadge(challenge.status)}
               {!challenge.adminCreated && (
